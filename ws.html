@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notification WebSocket Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .message {
+            background-color: #e3f2fd;
+            border: 1px solid #bbdefb;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 5px 0;
+            font-family: monospace;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { 
+            background-color: #6c757d; 
+            cursor: not-allowed; 
+        }
+        input, select {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        #messages {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #fafafa;
+        }
+        .form-group {
+            margin: 15px 0;
+        }
+        label {
+            display: inline-block;
+            width: 100px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔔 Notification WebSocket Test Client</h1>
+        
+        <div class="form-group">
+            <label>Client ID:</label>
+            <input type="number" id="clientId" value="1" min="1">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+        
+        <div id="status" class="status disconnected">Disconnected</div>
+        
+        <div class="form-group">
+            <h3>📨 Received Messages</h3>
+            <button onclick="clearMessages()">Clear Messages</button>
+            <div id="messages"></div>
+        </div>
+        
+        <div class="form-group">
+            <h3>📤 Send Test Notification via NATS</h3>
+            <p><em>Use these commands in your terminal to send notifications:</em></p>
+            <div class="message">
+                <strong>Broadcast to all clients:</strong><br>
+                <code>nats req NOTIFICATION.send-to-all '[{"type": "info", "message": "Hello World!", "time": "2024-01-01T10:00:00Z"}]'</code>
+            </div>
+            <div class="message">
+                <strong>Send to specific clients:</strong><br>
+                <code>nats req NOTIFICATION.send-to-clients '[{"type": "warning", "message": "Targeted message", "time": "2024-01-01T10:00:00Z", "clients": ["1", "2"]}]'</code>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+        let clientId = 1;
+
+        function connect() {
+            clientId = document.getElementById('clientId').value;
+            const wsUrl = `ws://localhost:8741/ws?key=${clientId}`;
+            
+            console.log('Connecting to:', wsUrl);
+            
+            try {
+                socket = new WebSocket(wsUrl);
+                
+                socket.onopen = function(event) {
+                    console.log('Connected to WebSocket server');
+                    updateStatus(true);
+                    addMessage('🟢 Connected to server', 'system');
+                };
+
+                socket.onmessage = function(event) {
+                    console.log('Received message:', event.data);
+                    try {
+                        const data = JSON.parse(event.data);
+                        addMessage(`📨 ${JSON.stringify(data, null, 2)}`, 'notification');
+                    } catch (e) {
+                        addMessage(`📨 ${event.data}`, 'raw');
+                    }
+                };
+
+                socket.onclose = function(event) {
+                    console.log('Disconnected from WebSocket server');
+                    updateStatus(false);
+                    addMessage('🔴 Disconnected from server', 'system');
+                    socket = null;
+                };
+
+                socket.onerror = function(error) {
+                    console.error('WebSocket error:', error);
+                    addMessage('❌ WebSocket error occurred', 'error');
+                };
+                
+            } catch (error) {
+                console.error('Connection error:', error);
+                addMessage('❌ Failed to connect: ' + error.message, 'error');
+            }
+        }
+
+        function disconnect() {
+            if (socket) {
+                socket.close();
+                socket = null;
+                updateStatus(false);
+            }
+        }
+
+        function updateStatus(connected) {
+            const statusEl = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            
+            if (connected) {
+                statusEl.textContent = `Connected as Client ${clientId}`;
+                statusEl.className = 'status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+            } else {
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        function addMessage(message, type) {
+            const messagesEl = document.getElementById('messages');
+            const messageEl = document.createElement('div');
+            messageEl.className = 'message';
+            
+            const timestamp = new Date().toLocaleTimeString();
+            messageEl.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
+            
+            messagesEl.appendChild(messageEl);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+        }
+
+        // Auto-connect on page load
+        window.addEventListener('load', function() {
+            // Don't auto-connect to avoid issues
+            addMessage('Ready to connect. Click "Connect" button.', 'system');
+        });
+    </script>
+</body>
+</html>
